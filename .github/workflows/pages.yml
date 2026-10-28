@@ -1,0 +1,52 @@
+name: Update and publish Guangdong Live
+on:
+  push:
+    branches: [master, main]
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: guangdong-live-publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Restore last database
+        run: |
+          if git fetch origin data; then
+            git show FETCH_HEAD:events.sqlite3 > events.sqlite3
+          fi
+      - name: Collect and export
+        run: |
+          python app.py --refresh
+          python export_site.py
+      - name: Preserve history on data branch
+        run: |
+          cp events.sqlite3 "$RUNNER_TEMP/events.sqlite3"
+          git switch --orphan data-next
+          git rm -rf .
+          cp "$RUNNER_TEMP/events.sqlite3" events.sqlite3
+          git add -f events.sqlite3
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -m "Save verified event history"
+          git push origin HEAD:data --force
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
